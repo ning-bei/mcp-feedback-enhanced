@@ -57,11 +57,18 @@
             // 自動執行命令設定
             autoCommandEnabled: true,      // 是否啟用自動執行命令
             commandOnNewSession: '',       // 新會話建立時執行的命令
-            commandOnFeedbackSubmit: ''    // 提交回饋後執行的命令
+            commandOnFeedbackSubmit: '',   // 提交回饋後執行的命令
+            // 按專案自動提交設定覆寫
+            projectAutoSubmit: {}
         };
         
         // 當前設定
         this.currentSettings = Utils.deepClone(this.defaultSettings);
+        
+        // 當前專案目錄（用於 per-project auto-submit）
+        this.currentProjectDirectory = null;
+        // UI 編輯範圍: 'global' | 'project'
+        this.autoSubmitScope = 'global';
         
         // 回調函數
         this.onSettingsChange = options.onSettingsChange || null;
@@ -375,6 +382,138 @@
     };
 
     /**
+     * 設定當前專案目錄
+     */
+    SettingsManager.prototype.setCurrentProject = function(projectDir) {
+        const oldDir = this.currentProjectDirectory;
+        this.currentProjectDirectory = projectDir || null;
+        if (oldDir !== this.currentProjectDirectory) {
+            console.log('📂 當前專案已更新:', this.currentProjectDirectory);
+            if (this.currentProjectDirectory && this.getProjectAutoSubmitSettings(this.currentProjectDirectory)) {
+                this.autoSubmitScope = 'project';
+            } else {
+                this.autoSubmitScope = 'global';
+            }
+        }
+        // Always refresh scope UI (translations may have loaded since last call)
+        this.applyAutoSubmitSettingsToUI();
+        this.updateAutoSubmitScopeUI();
+    };
+
+    /**
+     * 取得當前專案目錄
+     */
+    SettingsManager.prototype.getCurrentProject = function() {
+        return this.currentProjectDirectory;
+    };
+
+    /**
+     * 取得指定專案的自動提交設定覆寫（若無則回傳 null）
+     */
+    SettingsManager.prototype.getProjectAutoSubmitSettings = function(projectDir) {
+        if (!projectDir) return null;
+        var map = this.currentSettings.projectAutoSubmit || {};
+        var entry = map[projectDir];
+        if (entry && typeof entry === 'object') {
+            return {
+                enabled: Boolean(entry.enabled),
+                timeout: parseInt(entry.timeout) || 30,
+                promptId: entry.promptId || null
+            };
+        }
+        return null;
+    };
+
+    /**
+     * 設定指定專案的自動提交覆寫
+     */
+    SettingsManager.prototype.setProjectAutoSubmitSettings = function(projectDir, settings) {
+        if (!projectDir) return;
+        if (!this.currentSettings.projectAutoSubmit) {
+            this.currentSettings.projectAutoSubmit = {};
+        }
+        this.currentSettings.projectAutoSubmit[projectDir] = {
+            enabled: Boolean(settings.enabled),
+            timeout: parseInt(settings.timeout) || 30,
+            promptId: settings.promptId || null
+        };
+        this.saveSettings();
+        console.log('📂 專案自動提交設定已儲存:', projectDir, this.currentSettings.projectAutoSubmit[projectDir]);
+    };
+
+    /**
+     * 移除指定專案的自動提交覆寫（回退到全域）
+     */
+    SettingsManager.prototype.removeProjectAutoSubmitSettings = function(projectDir) {
+        if (!projectDir) return;
+        if (this.currentSettings.projectAutoSubmit && this.currentSettings.projectAutoSubmit[projectDir]) {
+            delete this.currentSettings.projectAutoSubmit[projectDir];
+            this.saveSettings();
+            console.log('📂 已移除專案自動提交覆寫:', projectDir);
+        }
+    };
+
+    /**
+     * 取得生效的自動提交設定（先查專案覆寫，再回退全域）
+     */
+    SettingsManager.prototype.getEffectiveAutoSubmitSettings = function() {
+        if (this.currentProjectDirectory) {
+            var projectSettings = this.getProjectAutoSubmitSettings(this.currentProjectDirectory);
+            if (projectSettings) {
+                return { scope: 'project', settings: projectSettings };
+            }
+        }
+        return {
+            scope: 'global',
+            settings: {
+                enabled: this.get('autoSubmitEnabled'),
+                timeout: this.get('autoSubmitTimeout'),
+                promptId: this.get('autoSubmitPromptId')
+            }
+        };
+    };
+
+    /**
+     * 檢查當前是否使用專案覆寫設定
+     */
+    SettingsManager.prototype.isUsingProjectSettings = function() {
+        return this.getEffectiveAutoSubmitSettings().scope === 'project';
+    };
+
+    /**
+     * 取得目前 UI 範圍下的自動提交設定
+     */
+    SettingsManager.prototype.getScopedAutoSubmitSettings = function() {
+        if (this.autoSubmitScope === 'project' && this.currentProjectDirectory) {
+            var ps = this.getProjectAutoSubmitSettings(this.currentProjectDirectory);
+            if (ps) return ps;
+        }
+        return {
+            enabled: this.get('autoSubmitEnabled'),
+            timeout: this.get('autoSubmitTimeout'),
+            promptId: this.get('autoSubmitPromptId')
+        };
+    };
+
+    /**
+     * 根據目前 UI 範圍保存自動提交設定
+     */
+    SettingsManager.prototype.setScopedAutoSubmitValue = function(key, value) {
+        if (this.autoSubmitScope === 'project' && this.currentProjectDirectory) {
+            var current = this.getProjectAutoSubmitSettings(this.currentProjectDirectory) || {
+                enabled: this.get('autoSubmitEnabled'),
+                timeout: this.get('autoSubmitTimeout'),
+                promptId: this.get('autoSubmitPromptId')
+            };
+            current[key] = value;
+            this.setProjectAutoSubmitSettings(this.currentProjectDirectory, current);
+        } else {
+            var settingKeyMap = { enabled: 'autoSubmitEnabled', timeout: 'autoSubmitTimeout', promptId: 'autoSubmitPromptId' };
+            this.set(settingKeyMap[key], value);
+        }
+    };
+
+    /**
      * 觸發自動提交狀態變更事件
      */
     SettingsManager.prototype.triggerAutoSubmitStateChange = function(enabled) {
@@ -418,6 +557,7 @@
 
         // 應用自動提交設定
         this.applyAutoSubmitSettingsToUI();
+        this.updateAutoSubmitScopeUI();
 
         // 應用會話歷史設定
         this.applySessionHistorySettings();
@@ -505,59 +645,64 @@
     };
 
     /**
-     * 應用自動提交設定到 UI
+     * 應用自動提交設定到 UI（使用當前範圍的設定）
      */
     SettingsManager.prototype.applyAutoSubmitSettingsToUI = function() {
-        // 更新自動提交啟用開關
+        var scoped = this.getScopedAutoSubmitSettings();
+
         const autoSubmitToggle = Utils.safeQuerySelector('#autoSubmitToggle');
         if (autoSubmitToggle) {
-            autoSubmitToggle.classList.toggle('active', this.currentSettings.autoSubmitEnabled);
+            autoSubmitToggle.classList.toggle('active', scoped.enabled);
         }
 
-        // 更新自動提交超時時間輸入框
         const autoSubmitTimeoutInput = Utils.safeQuerySelector('#autoSubmitTimeout');
         if (autoSubmitTimeoutInput) {
-            autoSubmitTimeoutInput.value = this.currentSettings.autoSubmitTimeout;
+            autoSubmitTimeoutInput.value = scoped.timeout;
         }
 
-        // 更新自動提交提示詞選擇下拉選單
         const autoSubmitPromptSelect = Utils.safeQuerySelector('#autoSubmitPromptSelect');
         if (autoSubmitPromptSelect) {
-            autoSubmitPromptSelect.value = this.currentSettings.autoSubmitPromptId || '';
+            autoSubmitPromptSelect.value = scoped.promptId || '';
         }
 
-        // 更新自動提交狀態顯示
         this.updateAutoSubmitStatusDisplay();
+        this.updateAutoSubmitScopeUI();
 
         console.log('自動提交設定已應用到 UI:', {
-            enabled: this.currentSettings.autoSubmitEnabled,
-            timeout: this.currentSettings.autoSubmitTimeout,
-            promptId: this.currentSettings.autoSubmitPromptId
+            scope: this.autoSubmitScope,
+            enabled: scoped.enabled,
+            timeout: scoped.timeout,
+            promptId: scoped.promptId
         });
     };
 
     /**
-     * 更新自動提交狀態顯示
+     * 更新自動提交狀態顯示（基於生效設定）
      */
     SettingsManager.prototype.updateAutoSubmitStatusDisplay = function() {
         const statusElement = Utils.safeQuerySelector('#autoSubmitStatus');
         if (!statusElement) return;
 
+        var effective = this.getEffectiveAutoSubmitSettings();
+        var s = effective.settings;
+
         const statusIcon = statusElement.querySelector('span:first-child');
         const statusText = statusElement.querySelector('.button-text');
 
-        if (this.currentSettings.autoSubmitEnabled && this.currentSettings.autoSubmitPromptId) {
-            // 直接設定 HTML 內容，就像提示詞按鈕一樣
+        if (s.enabled && s.promptId) {
             if (statusIcon) statusIcon.innerHTML = '⏰';
             if (statusText) {
                 const enabledText = window.i18nManager ?
                     window.i18nManager.t('autoSubmit.enabled', '已啟用') :
                     '已啟用';
-                statusText.textContent = `${enabledText} (${this.currentSettings.autoSubmitTimeout}秒)`;
+                var scopeLabel = effective.scope === 'project' ?
+                    (window.i18nManager ? window.i18nManager.t('autoSubmit.scope.project', '專案') : '專案') : '';
+                statusText.textContent = scopeLabel
+                    ? `${enabledText} (${s.timeout}秒) [${scopeLabel}]`
+                    : `${enabledText} (${s.timeout}秒)`;
             }
             statusElement.className = 'auto-submit-status-btn enabled';
         } else {
-            // 直接設定 HTML 內容，就像提示詞按鈕一樣
             if (statusIcon) statusIcon.innerHTML = '⏸️';
             if (statusText) {
                 const disabledText = window.i18nManager ?
@@ -566,6 +711,62 @@
                 statusText.textContent = disabledText;
             }
             statusElement.className = 'auto-submit-status-btn disabled';
+        }
+    };
+
+    /**
+     * 更新自動提交範圍選擇器 UI
+     */
+    SettingsManager.prototype.updateAutoSubmitScopeUI = function() {
+        var scopeSelect = Utils.safeQuerySelector('#autoSubmitScopeSelect');
+        if (!scopeSelect) return;
+
+        var projectOption = scopeSelect.querySelector('option[value="project"]');
+        if (projectOption) {
+            if (this.currentProjectDirectory) {
+                var projectName = this.currentProjectDirectory.split(/[/\\]/).pop() || this.currentProjectDirectory;
+                var label = window.i18nManager
+                    ? window.i18nManager.t('autoSubmit.scope.projectLabel', { name: projectName })
+                    : ('專案: ' + projectName);
+                projectOption.textContent = label;
+                projectOption.disabled = false;
+            } else {
+                projectOption.textContent = window.i18nManager
+                    ? window.i18nManager.t('autoSubmit.scope.noProject')
+                    : '(無專案)';
+                projectOption.disabled = true;
+                if (this.autoSubmitScope === 'project') {
+                    this.autoSubmitScope = 'global';
+                }
+            }
+        }
+
+        scopeSelect.value = this.autoSubmitScope;
+
+        var removeBtn = Utils.safeQuerySelector('#removeProjectAutoSubmitBtn');
+        if (removeBtn) {
+            var hasOverride = this.currentProjectDirectory &&
+                this.getProjectAutoSubmitSettings(this.currentProjectDirectory);
+            removeBtn.style.display = (this.autoSubmitScope === 'project' && hasOverride) ? '' : 'none';
+        }
+
+        // 範圍指示器跟隨 effective scope（真正影響 auto-submit 的設定來源）
+        var indicator = Utils.safeQuerySelector('#autoSubmitScopeIndicator');
+        if (indicator) {
+            var effective = this.getEffectiveAutoSubmitSettings();
+            if (effective.scope === 'project') {
+                var pName = this.currentProjectDirectory ? this.currentProjectDirectory.split(/[/\\]/).pop() : '';
+                var projectLabel = window.i18nManager
+                    ? window.i18nManager.t('autoSubmit.scope.usingProjectSettings', { name: pName })
+                    : '使用專案設定';
+                indicator.textContent = projectLabel;
+                indicator.className = 'auto-submit-scope-indicator project';
+            } else {
+                indicator.textContent = window.i18nManager
+                    ? window.i18nManager.t('autoSubmit.scope.usingGlobalSettings')
+                    : '使用全域設定';
+                indicator.className = 'auto-submit-scope-indicator global';
+            }
         }
     };
 
@@ -726,20 +927,58 @@
             });
         }
 
-        // 自動提交功能啟用開關
+        // 自動提交範圍選擇器
+        const autoSubmitScopeSelect = Utils.safeQuerySelector('#autoSubmitScopeSelect');
+        if (autoSubmitScopeSelect) {
+            autoSubmitScopeSelect.addEventListener('change', function(e) {
+                var newScope = e.target.value;
+                if (newScope === 'project' && !self.currentProjectDirectory) {
+                    e.target.value = 'global';
+                    return;
+                }
+                self.autoSubmitScope = newScope;
+                // 如果切到 project scope 但尚無覆寫，自動建立一份（複製全域）
+                if (newScope === 'project' && self.currentProjectDirectory &&
+                    !self.getProjectAutoSubmitSettings(self.currentProjectDirectory)) {
+                    self.setProjectAutoSubmitSettings(self.currentProjectDirectory, {
+                        enabled: self.get('autoSubmitEnabled'),
+                        timeout: self.get('autoSubmitTimeout'),
+                        promptId: self.get('autoSubmitPromptId')
+                    });
+                }
+                self.applyAutoSubmitSettingsToUI();
+                // 重新觸發 auto-submit 檢查
+                self.triggerAutoSubmitStateChange(self.getScopedAutoSubmitSettings().enabled);
+                console.log('📂 自動提交範圍切換:', newScope);
+            });
+        }
+
+        // 移除專案覆寫按鈕
+        const removeProjectAutoSubmitBtn = Utils.safeQuerySelector('#removeProjectAutoSubmitBtn');
+        if (removeProjectAutoSubmitBtn) {
+            removeProjectAutoSubmitBtn.addEventListener('click', function() {
+                if (self.currentProjectDirectory) {
+                    self.removeProjectAutoSubmitSettings(self.currentProjectDirectory);
+                    self.autoSubmitScope = 'global';
+                    self.applyAutoSubmitSettingsToUI();
+                    self.triggerAutoSubmitStateChange(self.get('autoSubmitEnabled'));
+                    var msg = window.i18nManager
+                        ? window.i18nManager.t('autoSubmit.scope.overrideRemoved', '已移除專案覆寫，改用全域設定')
+                        : '已移除專案覆寫，改用全域設定';
+                    Utils.showMessage(msg, Utils.CONSTANTS.MESSAGE_SUCCESS);
+                }
+            });
+        }
+
+        // 自動提交功能啟用開關（scope-aware）
         const autoSubmitToggle = Utils.safeQuerySelector('#autoSubmitToggle');
         if (autoSubmitToggle) {
             autoSubmitToggle.addEventListener('click', function() {
-                const newValue = !self.get('autoSubmitEnabled');
-                const currentPromptId = self.get('autoSubmitPromptId');
-
-                console.log('自動提交開關點擊:', {
-                    newValue: newValue,
-                    currentPromptId: currentPromptId
-                });
+                var scoped = self.getScopedAutoSubmitSettings();
+                const newValue = !scoped.enabled;
+                const currentPromptId = scoped.promptId;
 
                 try {
-                    // 如果要啟用自動提交，檢查是否已選擇提示詞
                     if (newValue && (!currentPromptId || currentPromptId === '')) {
                         const message = window.i18nManager ? 
                             window.i18nManager.t('settingsUI.autoCommitNoPrompt', '請先選擇一個提示詞作為自動提交內容') : 
@@ -748,12 +987,8 @@
                         return;
                     }
 
-                    self.set('autoSubmitEnabled', newValue);
+                    self.setScopedAutoSubmitValue('enabled', newValue);
                     autoSubmitToggle.classList.toggle('active', newValue);
-
-                    console.log('自動提交狀態已更新:', newValue);
-
-                    // 觸發自動提交狀態變更事件
                     self.triggerAutoSubmitStateChange(newValue);
                 } catch (error) {
                     Utils.showMessage(error.message, Utils.CONSTANTS.MESSAGE_ERROR);
@@ -761,87 +996,56 @@
             });
         }
 
-        // 自動提交超時時間設定
+        // 自動提交超時時間設定（scope-aware）
         const autoSubmitTimeoutInput = Utils.safeQuerySelector('#autoSubmitTimeout');
         if (autoSubmitTimeoutInput) {
             autoSubmitTimeoutInput.addEventListener('change', function(e) {
                 const timeout = parseInt(e.target.value);
-                try {
-                    self.setAutoSubmitSettings(
-                        self.get('autoSubmitEnabled'),
-                        timeout,
-                        self.get('autoSubmitPromptId')
-                    );
-                } catch (error) {
-                    Utils.showMessage(error.message, Utils.CONSTANTS.MESSAGE_ERROR);
-                    // 恢復原值
-                    e.target.value = self.get('autoSubmitTimeout');
+                if (isNaN(timeout) || timeout < 1) {
+                    Utils.showMessage('Timeout must be >= 1', Utils.CONSTANTS.MESSAGE_ERROR);
+                    e.target.value = self.getScopedAutoSubmitSettings().timeout;
+                    return;
                 }
+                self.setScopedAutoSubmitValue('timeout', timeout);
             });
         }
 
-        // 自動提交提示詞選擇
+        // 自動提交提示詞選擇（scope-aware）
         const autoSubmitPromptSelect = Utils.safeQuerySelector('#autoSubmitPromptSelect');
         if (autoSubmitPromptSelect) {
             autoSubmitPromptSelect.addEventListener('change', function(e) {
                 const promptId = e.target.value || null;
-                console.log('自動提交提示詞選擇變更:', promptId);
 
                 try {
-                    // 如果選擇了空值，清除自動提交設定
                     if (!promptId || promptId === '') {
-                        self.set('autoSubmitPromptId', null);
-                        self.set('autoSubmitEnabled', false);
+                        self.setScopedAutoSubmitValue('promptId', null);
+                        self.setScopedAutoSubmitValue('enabled', false);
 
-                        // 同時清除所有提示詞的 isAutoSubmit 標記
                         if (window.feedbackApp && window.feedbackApp.promptManager) {
                             window.feedbackApp.promptManager.clearAutoSubmitPrompt();
-                            console.log('🔄 已清除所有提示詞的自動提交標記');
-                        } else {
-                            console.warn('⚠️ promptManager 未找到，無法清除提示詞標記');
                         }
 
-                        // 觸發狀態變更事件，更新相關 UI 組件
                         self.triggerAutoSubmitStateChange(false);
-
-                        // 更新 UI 元素（按鈕狀態、倒數計時器等）
                         self.applyAutoSubmitSettingsToUI();
-
-                        console.log('清除自動提交設定並更新 UI');
                     } else {
-                        // 設定新的自動提交提示詞
-                        self.set('autoSubmitPromptId', promptId);
-                        console.log('設定自動提交提示詞 ID:', promptId);
+                        self.setScopedAutoSubmitValue('promptId', promptId);
 
-                        // 同時更新對應提示詞的 isAutoSubmit 標記
                         if (window.feedbackApp && window.feedbackApp.promptManager) {
                             try {
                                 window.feedbackApp.promptManager.setAutoSubmitPrompt(promptId);
-                                console.log('🔄 已設定提示詞的自動提交標記:', promptId);
-
-                                // 觸發狀態變更事件，更新相關 UI 組件
-                                const currentEnabled = self.get('autoSubmitEnabled');
+                                const currentEnabled = self.getScopedAutoSubmitSettings().enabled;
                                 self.triggerAutoSubmitStateChange(currentEnabled);
-
-                                // 更新 UI 元素
                                 self.applyAutoSubmitSettingsToUI();
-
-                                console.log('🔄 已更新自動提交 UI 狀態');
                             } catch (promptError) {
-                                console.error('❌ 設定提示詞自動提交標記失敗:', promptError);
-                                // 如果設定提示詞失敗，回滾設定
-                                self.set('autoSubmitPromptId', null);
+                                self.setScopedAutoSubmitValue('promptId', null);
                                 e.target.value = '';
                                 throw promptError;
                             }
-                        } else {
-                            console.warn('⚠️ promptManager 未找到，無法設定提示詞標記');
                         }
                     }
                 } catch (error) {
                     Utils.showMessage(error.message, Utils.CONSTANTS.MESSAGE_ERROR);
-                    // 恢復原值
-                    e.target.value = self.get('autoSubmitPromptId') || '';
+                    e.target.value = self.getScopedAutoSubmitSettings().promptId || '';
                 }
             });
         }

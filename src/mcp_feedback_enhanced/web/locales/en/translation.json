@@ -476,7 +476,18 @@
         "pauseCountdown": "Pause Countdown",
         "resumeCountdown": "Resume Countdown",
         "paused": "Auto submit paused",
-        "autoCommitNoPrompt": "Please select a prompt as auto-submit content first"
+        "autoCommitNoPrompt": "Please select a prompt as auto-submit content first",
+        "scope": {
+            "label": "Settings Scope",
+            "global": "Global",
+            "project": "Project",
+            "projectLabel": "Project: {name}",
+            "noProject": "(No project)",
+            "deleteOverride": "Remove Override",
+            "overrideRemoved": "Project override removed, using global settings",
+            "usingProjectSettings": "Active: Project ({name})",
+            "usingGlobalSettings": "Active: Global settings"
+        }
     },
     "audio": {
         "notification": {

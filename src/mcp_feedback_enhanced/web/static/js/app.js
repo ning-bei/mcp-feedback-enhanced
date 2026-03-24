@@ -252,7 +252,16 @@
                         // 13. 初始化 Textarea 高度管理器
                         self.initializeTextareaHeightManager();
 
-                        // 14. 應用設定到 UI
+                        // 14. 從 DOM 讀取專案目錄（模板渲染時已注入）
+                        var projectPathEl = document.getElementById('projectPathDisplay');
+                        if (projectPathEl) {
+                            var domProjectDir = projectPathEl.getAttribute('data-full-path');
+                            if (domProjectDir && self.settingsManager) {
+                                self.settingsManager.setCurrentProject(domProjectDir);
+                            }
+                        }
+
+                        // 15. 應用設定到 UI
                         self.settingsManager.applyToUI();
 
                         // 15. 初始化各個管理器
@@ -860,6 +869,11 @@
                 if (data.session_info) {
                     self.currentSessionId = data.session_info.session_id;
                     console.log('📋 新會話 ID:', self.currentSessionId);
+                    // 更新當前專案目錄
+                    var projectDir = data.session_info.project_directory || data.project_directory;
+                    if (projectDir && self.settingsManager) {
+                        self.settingsManager.setCurrentProject(projectDir);
+                    }
                 }
 
                 // 2. 刷新頁面內容（AI 摘要、表單等）
@@ -983,6 +997,11 @@
                 self.checkAndStartAutoSubmit();
             }, 200); // 延遲確保狀態更新完成
 
+            // 更新當前專案目錄
+            if (data.session_info.project_directory && this.settingsManager) {
+                this.settingsManager.setCurrentProject(data.session_info.project_directory);
+            }
+
             // 更新頁面標題
             if (data.session_info.project_directory) {
                 const projectName = data.session_info.project_directory.split(/[/\\]/).pop();
@@ -1029,6 +1048,11 @@
         // 更新 SessionManager 的狀態資訊
         if (this.sessionManager && this.sessionManager.updateStatusInfo) {
             this.sessionManager.updateStatusInfo(statusInfo);
+        }
+
+        // 更新當前專案目錄到 SettingsManager
+        if (statusInfo.project_directory && this.settingsManager) {
+            this.settingsManager.setCurrentProject(statusInfo.project_directory);
         }
 
         // 更新頁面標題顯示會話信息
@@ -1714,6 +1738,11 @@
                     self.uiManager.updateStatusIndicator();
                 }
 
+                // 更新當前專案目錄
+                if (sessionData.project_directory && self.settingsManager) {
+                    self.settingsManager.setCurrentProject(sessionData.project_directory);
+                }
+
                 // 更新頁面標題
                 if (sessionData.project_directory) {
                     const projectName = sessionData.project_directory.split(/[/\\]/).pop();
@@ -1828,7 +1857,6 @@
      * 檢查並啟動自動提交（原始版本，供防抖使用）
      */
     FeedbackApp.prototype._originalCheckAndStartAutoSubmit = function() {
-        // 減少重複日誌：只在首次檢查或條件變化時記錄
         if (!this._lastAutoSubmitCheck || Date.now() - this._lastAutoSubmitCheck > 1000) {
             console.log('🔍 檢查自動提交條件...');
             this._lastAutoSubmitCheck = Date.now();
@@ -1839,18 +1867,19 @@
             return;
         }
 
-        // 檢查自動提交是否已啟用
-        const autoSubmitEnabled = this.settingsManager.get('autoSubmitEnabled');
-        const autoSubmitPromptId = this.settingsManager.get('autoSubmitPromptId');
-        const autoSubmitTimeout = this.settingsManager.get('autoSubmitTimeout');
+        // 使用生效設定（先查專案覆寫，再回退全域）
+        var effective = this.settingsManager.getEffectiveAutoSubmitSettings();
+        var autoSubmitEnabled = effective.settings.enabled;
+        var autoSubmitPromptId = effective.settings.promptId;
+        var autoSubmitTimeout = effective.settings.timeout;
 
         console.log('🔍 自動提交設定檢查:', {
+            scope: effective.scope,
             enabled: autoSubmitEnabled,
             promptId: autoSubmitPromptId,
             timeout: autoSubmitTimeout
         });
 
-        // 雙重檢查：設定中的 promptId 和提示詞的 isAutoSubmit 狀態
         let validAutoSubmitPrompt = null;
         if (autoSubmitPromptId) {
             const prompt = this.promptManager.getPromptById(autoSubmitPromptId);
@@ -1862,22 +1891,27 @@
                     isAutoSubmit: prompt ? prompt.isAutoSubmit : false,
                     reason: !prompt ? '提示詞不存在' : '提示詞未標記為自動提交'
                 });
-                // 只清空無效的 promptId，保留用戶的 autoSubmitEnabled 設定
-                // 這樣避免因為提示詞問題而強制關閉用戶的自動提交偏好
-                this.settingsManager.set('autoSubmitPromptId', null);
-                console.log('🔧 已清空無效的 autoSubmitPromptId，保留 autoSubmitEnabled 設定:', autoSubmitEnabled);
+                // Clear invalid promptId in the effective scope
+                if (effective.scope === 'project' && this.settingsManager.currentProjectDirectory) {
+                    var ps = this.settingsManager.getProjectAutoSubmitSettings(this.settingsManager.currentProjectDirectory);
+                    if (ps) {
+                        ps.promptId = null;
+                        this.settingsManager.setProjectAutoSubmitSettings(this.settingsManager.currentProjectDirectory, ps);
+                    }
+                } else {
+                    this.settingsManager.set('autoSubmitPromptId', null);
+                }
+                console.log('🔧 已清空無效的 autoSubmitPromptId (scope:', effective.scope, ')，保留 autoSubmitEnabled 設定:', autoSubmitEnabled);
             }
         }
 
-        // 檢查當前狀態是否為等待回饋
         const currentState = this.uiManager ? this.uiManager.getFeedbackState() : null;
         const isWaitingForFeedback = currentState === window.MCPFeedback.Utils.CONSTANTS.FEEDBACK_WAITING;
 
         console.log('🔍 當前回饋狀態:', currentState, '是否等待回饋:', isWaitingForFeedback);
 
-        // 如果所有條件都滿足，啟動自動提交
         if (autoSubmitEnabled && validAutoSubmitPrompt && autoSubmitTimeout && isWaitingForFeedback) {
-            console.log('✅ 自動提交條件滿足，啟動倒數計時器');
+            console.log('✅ 自動提交條件滿足，啟動倒數計時器 (scope:', effective.scope, ')');
             this.autoSubmitManager.start(autoSubmitTimeout, autoSubmitPromptId);
             this.updateAutoSubmitStatus('enabled', autoSubmitTimeout);
         } else {

@@ -18,6 +18,8 @@ from ... import __version__
 from ...debug import web_debug_log as debug_log
 from ..constants import get_message_code as get_msg_code
 
+_startup_ts = str(int(time.time()))
+
 
 if TYPE_CHECKING:
     from ..main import WebUIManager
@@ -62,12 +64,13 @@ def setup_routes(manager: "WebUIManager"):
         if not current_session:
             # 沒有活躍會話時顯示等待頁面
             return manager.templates.TemplateResponse(
+                request,
                 "index.html",
                 {
-                    "request": request,
                     "title": "MCP Feedback Enhanced",
                     "has_session": False,
                     "version": __version__,
+                    "cache_bust": _startup_ts,
                 },
             )
 
@@ -76,13 +79,14 @@ def setup_routes(manager: "WebUIManager"):
         layout_mode = load_user_layout_settings()
 
         return manager.templates.TemplateResponse(
+            request,
             "feedback.html",
             {
-                "request": request,
                 "project_directory": current_session.project_directory,
                 "summary": current_session.summary,
                 "title": "Interactive Feedback - 回饋收集",
                 "version": __version__,
+                "cache_bust": _startup_ts,
                 "has_session": True,
                 "layout_mode": layout_mode,
             },

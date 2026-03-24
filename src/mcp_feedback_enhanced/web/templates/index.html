@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ title }}</title>
-    <link rel="stylesheet" href="/static/css/styles.css">
+    <link rel="stylesheet" href="/static/css/styles.css?v={{ cache_bust }}">
     <style>
         :root {
             /* 深色主題顏色變數 */
@@ -315,16 +315,16 @@
     </div>
 
     <!-- JavaScript -->
-    <script src="/static/js/i18n.js?v=2025010505"></script>
+    <script src="/static/js/i18n.js?v={{ cache_bust }}"></script>
     <!-- 載入所有模組 -->
-    <script src="/static/js/modules/utils.js?v=2025010505"></script>
+    <script src="/static/js/modules/utils.js?v={{ cache_bust }}"></script>
 
-    <script src="/static/js/modules/websocket-manager.js?v=2025010505"></script>
-    <script src="/static/js/modules/image-handler.js?v=2025010505"></script>
-    <script src="/static/js/modules/settings-manager.js?v=2025010505"></script>
-    <script src="/static/js/modules/ui-manager.js?v=2025010505"></script>
-    <script src="/static/js/modules/auto-refresh-manager.js?v=2025010505"></script>
+    <script src="/static/js/modules/websocket-manager.js?v={{ cache_bust }}"></script>
+    <script src="/static/js/modules/image-handler.js?v={{ cache_bust }}"></script>
+    <script src="/static/js/modules/settings-manager.js?v={{ cache_bust }}"></script>
+    <script src="/static/js/modules/ui-manager.js?v={{ cache_bust }}"></script>
+    <script src="/static/js/modules/auto-refresh-manager.js?v={{ cache_bust }}"></script>
     <!-- 主應用程式 -->
-    <script src="/static/js/app.js?v=2025010505"></script>
+    <script src="/static/js/app.js?v={{ cache_bust }}"></script>
 </body>
 </html>

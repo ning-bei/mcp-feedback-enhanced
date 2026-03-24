@@ -478,7 +478,18 @@
         "countdownLabel": "提交倒數",
         "pauseCountdown": "暫停倒數",
         "resumeCountdown": "恢復倒數",
-        "paused": "自動提交已暫停"
+        "paused": "自動提交已暫停",
+        "scope": {
+            "label": "設定範圍",
+            "global": "全域",
+            "project": "專案",
+            "projectLabel": "專案: {name}",
+            "noProject": "(無專案)",
+            "deleteOverride": "移除覆寫",
+            "overrideRemoved": "已移除專案覆寫，改用全域設定",
+            "usingProjectSettings": "生效: 專案 ({name})",
+            "usingGlobalSettings": "生效: 全域設定"
+        }
     },
     "audio": {
         "notification": {

@@ -472,7 +472,18 @@
         "countdownLabel": "提交倒数",
         "pauseCountdown": "暂停倒数",
         "resumeCountdown": "恢复倒数",
-        "paused": "自动提交已暂停"
+        "paused": "自动提交已暂停",
+        "scope": {
+            "label": "设定范围",
+            "global": "全局",
+            "project": "项目",
+            "projectLabel": "项目: {name}",
+            "noProject": "(无项目)",
+            "deleteOverride": "移除覆写",
+            "overrideRemoved": "已移除项目覆写，改用全局设定",
+            "usingProjectSettings": "生效: 项目 ({name})",
+            "usingGlobalSettings": "生效: 全局设定"
+        }
     },
     "audio": {
         "notification": {
